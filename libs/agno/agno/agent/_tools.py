@@ -402,10 +402,13 @@ def parse_tools(
                 agent._tool_instructions.append(tool.instructions)
 
         elif isinstance(tool, ContextProvider):
-            # Expand provider and process each function inline (like Toolkit)
+            # ContextProvider.get_tools() returns different types based on mode:
+            #   mode=default/agent → Function wrappers (query_wiki, update_wiki)
+            #   mode=tools → Toolkit instances (FileTools, GmailTools, etc.)
+            # We handle both cases here, mirroring the Toolkit branch above.
             for _func in tool.get_tools(async_mode=async_mode):
                 if isinstance(_func, Toolkit):
-                    # mode=tools returns Toolkit — expand like the Toolkit branch
+                    # mode=tools: provider returns raw Toolkit — expand its functions
                     toolkit_functions = _func.get_async_functions() if async_mode else _func.get_functions()
                     for name, tk_func in toolkit_functions.items():
                         if name in _function_names:
@@ -415,6 +418,7 @@ def parse_tools(
                             )
                             continue
                         _function_names.append(name)
+                        # Deep copy: avoid mutating provider's cached toolkit
                         tk_func = tk_func.model_copy(deep=True)
                         tk_func._agent = agent
                         if agent._team is not None:
@@ -428,6 +432,8 @@ def parse_tools(
                         _functions.append(tk_func)
                         log_debug(f"Added tool {name} from ContextProvider toolkit")
                     continue
+
+                # mode=default/agent: provider returns Function wrappers
                 if not isinstance(_func, Function):
                     continue
                 if _func.name in _function_names:

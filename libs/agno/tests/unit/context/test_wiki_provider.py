@@ -641,9 +641,9 @@ async def test_provider_query_tool_serialises_answer(tmp_path: Path):
             yield RunOutput(content="hello")
 
     p._read_agent = _StubAgent()
-    tool = next(t for t in p.get_tools() if t.name == "query_wiki")
+    tool = next(t for t in p.get_tools(async_mode=True) if t.name == "query_wiki")
 
-    # Collect output from generator (tool wrapper returns coroutine)
+    # Collect output from generator (tool wrapper returns coroutine that yields generator)
     gen = await tool.entrypoint(question="anything")
     out = ""
     async for chunk in gen:

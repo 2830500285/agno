@@ -260,7 +260,7 @@ class ContextProvider(ABC):
         When async_mode=True: returns async generator for agent.arun()
         """
         if async_mode:
-            return self._query_tool_async()
+            return self._aquery_tool()
         return self._query_tool_sync()
 
     def _query_tool_sync(self):
@@ -268,9 +268,7 @@ class ContextProvider(ABC):
         provider = self
 
         @tool(name=self.query_tool_name)
-        def _query(
-            question: str, run_context: RunContext | None = None
-        ) -> Iterator[Union[RunOutputEvent, str]]:
+        def _query(question: str, run_context: RunContext | None = None) -> Iterator[Union[RunOutputEvent, str]]:
             if provider.stream_sub_agent_events:
                 try:
                     provider.setup()
@@ -328,7 +326,7 @@ class ContextProvider(ABC):
 
         return _query
 
-    def _query_tool_async(self):
+    def _aquery_tool(self):
         """Async query tool for agent.arun(). Uses async hooks and iteration."""
         provider = self
 
@@ -396,7 +394,7 @@ class ContextProvider(ABC):
     def _update_tool(self, async_mode: bool = False):
         """Update tool with dual sync/async support."""
         if async_mode:
-            return self._update_tool_async()
+            return self._aupdate_tool()
         return self._update_tool_sync()
 
     def _update_tool_sync(self):
@@ -415,7 +413,7 @@ class ContextProvider(ABC):
 
         return _update
 
-    def _update_tool_async(self):
+    def _aupdate_tool(self):
         """Async update tool for agent.arun()."""
         provider = self
 

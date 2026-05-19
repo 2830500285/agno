@@ -27,12 +27,40 @@ def _collect_tool_output_sync(tool, **kwargs) -> str:
 
 
 async def _collect_tool_output_async(tool, **kwargs) -> str:
-    """Collect final string output from an async generator tool."""
+    """Collect final string output from an async tool.
+
+    Handles both regular async functions and async generators.
+    The @tool decorator wraps async generators in a coroutine that
+    returns the generator, so we need to await first.
+    """
     result = ""
-    async for chunk in tool.entrypoint(**kwargs):
-        if isinstance(chunk, str):
-            result = chunk
+    gen = tool.entrypoint(**kwargs)
+    # Await the wrapper coroutine to get the actual generator/result
+    inner = await gen
+    if hasattr(inner, "__anext__"):
+        async for chunk in inner:
+            if isinstance(chunk, str):
+                result = chunk
+    else:
+        result = inner
     return result
+
+
+async def _collect_streaming_chunks(tool, **kwargs) -> list:
+    """Collect all chunks from an async streaming tool.
+
+    The @tool decorator wraps async generators in a coroutine,
+    so we await first to get the actual generator.
+    """
+    chunks = []
+    gen = tool.entrypoint(**kwargs)
+    inner = await gen
+    if hasattr(inner, "__anext__"):
+        async for chunk in inner:
+            chunks.append(chunk)
+    else:
+        chunks.append(inner)
+    return chunks
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +165,8 @@ class _TwoToolProvider(_EchoProvider):
     async def aupdate(self, instruction: str, *, run_context: RunContext | None = None) -> Answer:
         return Answer(text=f"u:{instruction}")
 
-    def _default_tools(self) -> list:
-        return self._read_write_tools()
+    def _default_tools(self, async_mode: bool = False) -> list:
+        return self._read_write_tools(async_mode=async_mode)
 
 
 def test_read_write_helper_default_returns_both_tools():
@@ -235,7 +263,7 @@ async def test_query_tool_includes_results_when_populated():
                 text="see results",
             )
 
-    tool_ = _WithDocs(id="e")._query_tool()
+    tool_ = _WithDocs(id="e")._query_tool(async_mode=True)
     out = await _collect_tool_output_async(tool_, question="hello")
     payload = json.loads(out)
     assert payload["text"] == "see results"
@@ -250,7 +278,7 @@ async def test_query_tool_includes_results_when_populated():
 @pytest.mark.asyncio
 async def test_update_tool_happy_path():
     p = _WritableProvider(id="w")
-    tool_ = p._update_tool()
+    tool_ = p._update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert payload == {"text": "u:add x"}
@@ -259,7 +287,7 @@ async def test_update_tool_happy_path():
 @pytest.mark.asyncio
 async def test_update_tool_reports_read_only_when_not_overridden():
     p = _EchoProvider(id="ro")  # no aupdate override -> base raises NotImplementedError
-    tool_ = p._update_tool()
+    tool_ = p._update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     # Specifically a read-only message, not a generic exception string —
@@ -270,7 +298,7 @@ async def test_update_tool_reports_read_only_when_not_overridden():
 @pytest.mark.asyncio
 async def test_update_tool_catches_aupdate_exceptions():
     p = _RaisingWritableProvider(id="w")
-    tool_ = p._update_tool()
+    tool_ = p._update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert "error" in payload
@@ -295,7 +323,7 @@ async def test_query_tool_forwards_run_context_to_aquery():
             return Answer(text=f"q:{question}")
 
     p = _Captor(id="c")
-    query_tool = p._query_tool()
+    query_tool = p._query_tool(async_mode=True)
     rc = RunContext(run_id="r-1", user_id="u-1", session_id="s-1", metadata={"action_token": "xoxa-abc"})
     # Framework would normally inject run_context via Function._run_context;
     # calling the entrypoint directly with run_context= simulates that path.
@@ -313,7 +341,7 @@ async def test_update_tool_forwards_run_context_to_aupdate():
             return Answer(text=f"u:{instruction}")
 
     p = _WCaptor(id="w")
-    update_tool = p._update_tool()
+    update_tool = p._update_tool(async_mode=True)
     rc = RunContext(run_id="r-2", session_id="s-2", user_id="u-2", dependencies={"db_url": "postgres://..."})
     await update_tool.entrypoint(instruction="write x", run_context=rc)
     assert captured["run_context"] is rc
@@ -441,10 +469,13 @@ class _MockSubAgent:
             yield event
         yield RunOutput(run_id="sub-run-1", content=f"sub-agent answer: {question}")
 
+    async def arun(self, question, **kwargs):
+        from agno.run.agent import RunOutput
 
-def _collect_streaming_chunks(tool, **kwargs) -> list:
-    """Collect all chunks from a sync generator tool."""
-    return list(tool.entrypoint(**kwargs))
+        self.last_call_kwargs = kwargs
+        for event in self._events:
+            yield event
+        yield RunOutput(run_id="sub-run-1", content=f"sub-agent answer: {question}")
 
 
 @pytest.mark.asyncio
@@ -454,7 +485,7 @@ async def test_streaming_tool_yields_sub_agent_events():
 
     mock_event = RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=[mock_event])
-    chunks = await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
 
     # Should yield: 1 event + 1 final JSON answer
     assert len(chunks) == 2
@@ -480,7 +511,7 @@ async def test_streaming_tool_passes_correct_flags_to_sub_agent():
             return mock_agent
 
     p = _KwargsCapturingProvider(id="e", stream_sub_agent_events=True)
-    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
 
     assert mock_agent.last_call_kwargs["stream"] is True
     assert mock_agent.last_call_kwargs["stream_events"] is True
@@ -495,7 +526,7 @@ async def test_streaming_tool_sets_parent_run_id_on_events():
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
     rc = RunContext(run_id="parent-run-123", session_id="s-1", user_id="u-1")
-    chunks = await _collect_streaming_chunks(p._query_tool(), question="test", run_context=rc)
+    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=rc)
 
     assert chunks[0].parent_run_id == "parent-run-123"
 
@@ -507,7 +538,7 @@ async def test_streaming_tool_calls_asetup_before_running():
 
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
-    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
 
     assert p._asetup_called
 
@@ -519,7 +550,7 @@ async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
 
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
-    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
 
     assert not p._aquery_called
 
@@ -528,7 +559,7 @@ async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
 async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
     """When _aget_query_agent returns None, streaming tool calls aquery()."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=None)
-    out = await _collect_tool_output_async(p._query_tool(), question="hello")
+    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="hello")
 
     assert p._aquery_called
     payload = json.loads(out)
@@ -539,7 +570,7 @@ async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
 async def test_simple_tool_never_calls_aget_query_agent():
     """Non-streaming tool uses aquery() directly, never checks for sub-agent."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=False, sub_agent_events=[])
-    await p._query_tool().entrypoint(question="hello")
+    await _collect_tool_output_async(p._query_tool(async_mode=True), question="hello")
 
     assert p._aquery_called
     assert not p._aget_query_agent_called

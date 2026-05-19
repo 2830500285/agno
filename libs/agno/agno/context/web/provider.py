@@ -83,7 +83,7 @@ class WebContextProvider(ContextProvider):
     # search + fetch itself. mode=tools still surfaces the backend's
     # tools flat for callers that want to drive search directly.
     def _default_tools(self, async_mode: bool = False) -> list:
-        return [self._query_tool()]
+        return [self._query_tool(async_mode=async_mode)]
 
     def _all_tools(self, async_mode: bool = False) -> list:
         return self.backend.get_tools()

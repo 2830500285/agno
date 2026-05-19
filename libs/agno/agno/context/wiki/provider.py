@@ -181,7 +181,7 @@ class WikiContextProvider(ContextProvider):
     # ------------------------------------------------------------------
 
     def _default_tools(self, async_mode: bool = False) -> list:
-        return self._read_write_tools()
+        return self._read_write_tools(async_mode=async_mode)
 
     def _all_tools(self, async_mode: bool = False) -> list:
         # mode=tools is read-only on purpose. The default surface

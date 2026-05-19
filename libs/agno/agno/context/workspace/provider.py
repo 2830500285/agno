@@ -86,7 +86,7 @@ class WorkspaceContextProvider(ContextProvider):
     # ------------------------------------------------------------------
 
     def _default_tools(self, async_mode: bool = False) -> list:
-        return [self._query_tool()]
+        return [self._query_tool(async_mode=async_mode)]
 
     def _all_tools(self, async_mode: bool = False) -> list:
         return [self._build_workspace_tools()]

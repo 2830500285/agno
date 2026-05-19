@@ -18,6 +18,7 @@ from typing import (
 if TYPE_CHECKING:
     from agno.agent.agent import Agent
 
+from agno.context.provider import ContextProvider
 from agno.models.base import Model
 from agno.models.message import Message
 from agno.models.metrics import MessageMetrics
@@ -26,7 +27,6 @@ from agno.run import RunContext
 from agno.run.agent import RunOutput, RunOutputEvent
 from agno.run.messages import RunMessages
 from agno.session import AgentSession
-from agno.context.provider import ContextProvider
 from agno.tools import Toolkit
 from agno.tools.function import Function
 from agno.utils.agent import (

@@ -44,7 +44,7 @@ wiki = WikiContextProvider(
 
 agent = Agent(
     model=OpenAIResponses(id="gpt-5.4"),
-    tools=wiki.get_tools(),
+    tools=[wiki],
     instructions=wiki.instructions(),
     markdown=True,
 )

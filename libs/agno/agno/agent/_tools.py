@@ -26,6 +26,7 @@ from agno.run import RunContext
 from agno.run.agent import RunOutput, RunOutputEvent
 from agno.run.messages import RunMessages
 from agno.session import AgentSession
+from agno.context.provider import ContextProvider
 from agno.tools import Toolkit
 from agno.tools.function import Function
 from agno.utils.agent import (
@@ -399,6 +400,31 @@ def parse_tools(
             # Add instructions from the toolkit
             if tool.add_instructions and tool.instructions is not None:
                 agent._tool_instructions.append(tool.instructions)
+
+        elif isinstance(tool, ContextProvider):
+            # Expand provider and process each function inline (like Toolkit)
+            for _func in tool.get_tools(async_mode=async_mode):
+                if not isinstance(_func, Function):
+                    continue
+                if _func.name in _function_names:
+                    log_warning(
+                        f"Duplicate tool name '{_func.name}' from provider "
+                        f"already registered on agent; skipping the duplicate."
+                    )
+                    continue
+                _function_names.append(_func.name)
+                _func = _func.model_copy(deep=True)
+                _func._agent = agent
+                if agent._team is not None:
+                    _func._team = agent._team
+                effective_strict = strict if _func.strict is None else _func.strict
+                _func.process_entrypoint(strict=effective_strict)
+                if strict and _func.strict is None:
+                    _func.strict = True
+                if agent.tool_hooks is not None:
+                    _func.tool_hooks = agent.tool_hooks
+                _functions.append(_func)
+                log_debug(f"Added tool {_func.name} from ContextProvider")
 
         elif isinstance(tool, Function):
             if tool.name in _function_names:

@@ -187,26 +187,15 @@ class ContextProvider(ABC):
     # ------------------------------------------------------------------
 
     def _get_query_agent(self, run_context: RunContext | None) -> "Agent | None":
-        """Return sub-agent for streaming. Override in subclasses.
-
-        Most providers override this directly since their _ensure_agent()
-        methods are synchronous and non-blocking (return cached agents).
-        Only override _aget_query_agent() if you need async setup (e.g. MCP).
-        """
+        """Return sub-agent for streaming. Override in subclasses."""
         return None
 
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
-        """Async variant of _get_query_agent. Tries sync hook first.
-
-        Override this only if you need async setup (e.g. MCP session connect).
-        For providers with sync _ensure_agent(), override _get_query_agent() instead.
-        """
-        # Most providers implement sync _get_query_agent() — their _ensure_agent()
-        # returns a cached agent with no I/O. Safe to call from async context.
+        """Async variant — override only if setup requires I/O (e.g. MCP)."""
         return self._get_query_agent(run_context)
 
     def setup(self) -> None:
-        """Sync wrapper for asetup. Falls back silently if in event loop."""
+        """Sync setup. Skips if already in an event loop."""
         try:
             asyncio.get_running_loop()
             # Already in async context — skip sync setup
@@ -254,17 +243,11 @@ class ContextProvider(ABC):
         return tools
 
     def _query_tool(self, async_mode: bool = False):
-        """Query tool with dual sync/async support.
-
-        When async_mode=False: returns sync generator for agent.run()
-        When async_mode=True: returns async generator for agent.arun()
-        """
         if async_mode:
             return self._aquery_tool()
         return self._query_tool_sync()
 
     def _query_tool_sync(self):
-        """Sync query tool for agent.run(). Uses sync hooks and iteration."""
         provider = self
 
         @tool(name=self.query_tool_name)
@@ -327,7 +310,6 @@ class ContextProvider(ABC):
         return _query
 
     def _aquery_tool(self):
-        """Async query tool for agent.arun(). Uses async hooks and iteration."""
         provider = self
 
         @tool(name=self.query_tool_name)
@@ -392,13 +374,11 @@ class ContextProvider(ABC):
         return _query
 
     def _update_tool(self, async_mode: bool = False):
-        """Update tool with dual sync/async support."""
         if async_mode:
             return self._aupdate_tool()
         return self._update_tool_sync()
 
     def _update_tool_sync(self):
-        """Sync update tool for agent.run()."""
         provider = self
 
         @tool(name=self.update_tool_name)
@@ -414,7 +394,6 @@ class ContextProvider(ABC):
         return _update
 
     def _aupdate_tool(self):
-        """Async update tool for agent.arun()."""
         provider = self
 
         @tool(name=self.update_tool_name)

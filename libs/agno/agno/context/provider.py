@@ -290,6 +290,7 @@ class ContextProvider(ABC):
                         if isinstance(event, RunContentEvent):
                             continue
 
+                        # Link sub-agent events to parent; preserve if already set
                         event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
                         yield event
 
@@ -300,6 +301,7 @@ class ContextProvider(ABC):
                         yield json.dumps(_serialize_answer(answer))
                     return
 
+            # No sub-agent or streaming disabled — direct query
             try:
                 answer = provider.query(question, run_context=run_context)
             except Exception as exc:
@@ -354,6 +356,7 @@ class ContextProvider(ABC):
                         if isinstance(event, RunContentEvent):
                             continue
 
+                        # Link sub-agent events to parent; preserve if already set
                         event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
                         yield event
 
@@ -364,6 +367,7 @@ class ContextProvider(ABC):
                         yield json.dumps(_serialize_answer(answer))
                     return
 
+            # No sub-agent or streaming disabled — direct query
             try:
                 answer = await provider.aquery(question, run_context=run_context)
             except Exception as exc:

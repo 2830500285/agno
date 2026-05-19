@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Iterator, Union
 from agno.context.mode import ContextMode
 from agno.run import RunContext
 from agno.run.agent import RunOutput, RunOutputEvent
-from agno.team._response import TeamRunOutput
+from agno.team import TeamRunOutput
 from agno.tools import tool
 
 if TYPE_CHECKING:

@@ -190,8 +190,10 @@ class ContextProvider(ABC):
         """Sync wrapper for _aget_query_agent. Falls back to query() if in event loop."""
         try:
             asyncio.get_running_loop()
+            # Already in async context — can't use asyncio.run, fall back to query()
             return None
         except RuntimeError:
+            # No running loop — safe to use asyncio.run
             return asyncio.run(self._aget_query_agent(run_context))
 
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
@@ -202,7 +204,9 @@ class ContextProvider(ABC):
         """Sync wrapper for asetup. Falls back silently if in event loop."""
         try:
             asyncio.get_running_loop()
+            # Already in async context — skip sync setup
         except RuntimeError:
+            # No running loop — safe to use asyncio.run
             asyncio.run(self.asetup())
 
     def _run_kwargs_for_sub_agent(self, run_context: RunContext | None) -> dict:

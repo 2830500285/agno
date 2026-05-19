@@ -125,18 +125,18 @@ class SlackContextProvider(ContextProvider):
     # scope minimal. mode=tools surfaces raw read tools for direct use.
 
     def _default_tools(self, async_mode: bool = False) -> list:
-        return self._read_write_tools()
+        return self._read_write_tools(async_mode=async_mode)
 
-    def _query_tool(self):
-        query_tool = super()._query_tool()
+    def _query_tool(self, async_mode: bool = False):
+        query_tool = super()._query_tool(async_mode=async_mode)
         query_tool.description = (
             "Read Slack with a natural-language request. Use for channel history, workspace search, "
             "threads, and user or channel lookups."
         )
         return query_tool
 
-    def _update_tool(self):
-        update_tool = super()._update_tool()
+    def _update_tool(self, async_mode: bool = False):
+        update_tool = super()._update_tool(async_mode=async_mode)
         update_tool.description = (
             "Post a Slack message or thread reply with a natural-language instruction. Include the "
             "destination channel and the exact message to send. If the user asks to post, send, or "

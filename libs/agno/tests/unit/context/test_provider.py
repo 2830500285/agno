@@ -17,10 +17,19 @@ from agno.context.provider import _sanitize_id
 from agno.run import RunContext
 
 
-def _collect_tool_output(tool, **kwargs) -> str:
+def _collect_tool_output_sync(tool, **kwargs) -> str:
     """Collect final string output from a sync generator tool."""
     result = ""
     for chunk in tool.entrypoint(**kwargs):
+        if isinstance(chunk, str):
+            result = chunk
+    return result
+
+
+async def _collect_tool_output_async(tool, **kwargs) -> str:
+    """Collect final string output from an async generator tool."""
+    result = ""
+    async for chunk in tool.entrypoint(**kwargs):
         if isinstance(chunk, str):
             result = chunk
     return result
@@ -178,8 +187,8 @@ def test_mode_agent_silently_ignores_read_false():
 @pytest.mark.asyncio
 async def test_query_tool_serializes_answer_text():
     p = _EchoProvider(id="e")
-    query_tool = p._query_tool()
-    out = await _collect_tool_output(query_tool, question="hello")
+    query_tool = p._query_tool(async_mode=True)
+    out = await _collect_tool_output_async(query_tool, question="hello")
     payload = json.loads(out)
     # Empty `results` is omitted — no provider populates Document
     # results today, and shipping `"results": []` on every call is
@@ -190,8 +199,8 @@ async def test_query_tool_serializes_answer_text():
 @pytest.mark.asyncio
 async def test_query_tool_catches_aquery_exceptions():
     p = _RaisingQueryProvider(id="e")
-    query_tool = p._query_tool()
-    out = await _collect_tool_output(query_tool, question="hello")
+    query_tool = p._query_tool(async_mode=True)
+    out = await _collect_tool_output_async(query_tool, question="hello")
     payload = json.loads(out)
     # Error is reported as a string — the calling agent sees it but
     # isn't crashed.
@@ -208,8 +217,8 @@ async def test_query_tool_omits_both_when_answer_is_empty():
         async def aquery(self, question: str, *, run_context: RunContext | None = None) -> Answer:
             return Answer()
 
-    tool_ = _DocsOnly(id="e")._query_tool()
-    out = await _collect_tool_output(tool_, question="hello")
+    tool_ = _DocsOnly(id="e")._query_tool(async_mode=True)
+    out = await _collect_tool_output_async(tool_, question="hello")
     payload = json.loads(out)
     assert payload == {}
 
@@ -227,7 +236,7 @@ async def test_query_tool_includes_results_when_populated():
             )
 
     tool_ = _WithDocs(id="e")._query_tool()
-    out = await _collect_tool_output(tool_, question="hello")
+    out = await _collect_tool_output_async(tool_, question="hello")
     payload = json.loads(out)
     assert payload["text"] == "see results"
     assert payload["results"] == [{"id": "d1", "name": "Page 1", "uri": "/p/1", "source": None, "snippet": "hello"}]
@@ -372,23 +381,18 @@ async def test_base_asetup_is_idempotent():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_simple_tool_returns_string_directly():
-    """Non-streaming tool returns JSON string via aquery()."""
+def test_simple_tool_returns_string_directly():
+    """Non-streaming tool returns JSON string via query()."""
     p = _EchoProvider(id="e", stream_sub_agent_events=False)
-    query_tool = p._query_tool()
-    # Use the same pattern as _collect_tool_output
-    result = await query_tool.entrypoint(question="hello")
-    assert isinstance(result, str)
-    payload = json.loads(result)
+    out = _collect_tool_output(p._query_tool(), question="hello")
+    payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
 
-@pytest.mark.asyncio
-async def test_streaming_tool_yields_final_answer():
+def test_streaming_tool_yields_final_answer():
     """Streaming tool yields JSON answer when no sub-agent is configured."""
     p = _EchoProvider(id="e", stream_sub_agent_events=True)
-    out = await _collect_tool_output(p._query_tool(), question="hello")
+    out = _collect_tool_output(p._query_tool(), question="hello")
     payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
@@ -429,7 +433,7 @@ class _MockSubAgent:
         self._events = events
         self.last_call_kwargs = None
 
-    async def arun(self, question, **kwargs):
+    def run(self, question, **kwargs):
         from agno.run.agent import RunOutput
 
         self.last_call_kwargs = kwargs
@@ -438,12 +442,9 @@ class _MockSubAgent:
         yield RunOutput(run_id="sub-run-1", content=f"sub-agent answer: {question}")
 
 
-async def _collect_streaming_chunks(tool, **kwargs) -> list:
-    """Collect all chunks from a streaming tool (generator or coroutine)."""
-    gen = await tool.entrypoint(**kwargs)
-    if hasattr(gen, "__anext__"):
-        return [chunk async for chunk in gen]
-    return [gen]
+def _collect_streaming_chunks(tool, **kwargs) -> list:
+    """Collect all chunks from a sync generator tool."""
+    return list(tool.entrypoint(**kwargs))
 
 
 @pytest.mark.asyncio

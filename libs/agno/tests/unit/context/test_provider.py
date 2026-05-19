@@ -299,7 +299,7 @@ async def test_query_tool_forwards_run_context_to_aquery():
     rc = RunContext(run_id="r-1", user_id="u-1", session_id="s-1", metadata={"action_token": "xoxa-abc"})
     # Framework would normally inject run_context via Function._run_context;
     # calling the entrypoint directly with run_context= simulates that path.
-    await _collect_tool_output(query_tool, question="hello", run_context=rc)
+    await _collect_tool_output_async(query_tool, question="hello", run_context=rc)
     assert captured["run_context"] is rc
 
 
@@ -384,7 +384,7 @@ async def test_base_asetup_is_idempotent():
 def test_simple_tool_returns_string_directly():
     """Non-streaming tool returns JSON string via query()."""
     p = _EchoProvider(id="e", stream_sub_agent_events=False)
-    out = _collect_tool_output(p._query_tool(), question="hello")
+    out = _collect_tool_output_sync(p._query_tool(), question="hello")
     payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
@@ -392,7 +392,7 @@ def test_simple_tool_returns_string_directly():
 def test_streaming_tool_yields_final_answer():
     """Streaming tool yields JSON answer when no sub-agent is configured."""
     p = _EchoProvider(id="e", stream_sub_agent_events=True)
-    out = _collect_tool_output(p._query_tool(), question="hello")
+    out = _collect_tool_output_sync(p._query_tool(), question="hello")
     payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
@@ -528,7 +528,7 @@ async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
 async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
     """When _aget_query_agent returns None, streaming tool calls aquery()."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=None)
-    out = await _collect_tool_output(p._query_tool(), question="hello")
+    out = await _collect_tool_output_async(p._query_tool(), question="hello")
 
     assert p._aquery_called
     payload = json.loads(out)

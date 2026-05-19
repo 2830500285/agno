@@ -36,13 +36,14 @@ import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Iterator, Union
+from typing import TYPE_CHECKING, AsyncIterator, Iterator, Union
 
 from agno.context.mode import ContextMode
 from agno.run import RunContext
 from agno.run.agent import RunOutput, RunOutputEvent
 from agno.team import TeamRunOutput
 from agno.tools import tool
+from agno.team._response import TeamRunOutputEvent
 
 if TYPE_CHECKING:
     from agno.agent import Agent
@@ -176,28 +177,34 @@ class ContextProvider(ABC):
             return f"`{self.name}`: use the underlying tools to explore this source."
         return f"`{self.name}`: call `{self.query_tool_name}(question)` to query this source."
 
-    def get_tools(self) -> list:
+    def get_tools(self, async_mode: bool = False) -> list:
         if self.mode == ContextMode.default:
-            return self._default_tools()
+            return self._default_tools(async_mode=async_mode)
         if self.mode == ContextMode.tools:
-            return self._all_tools()
-        return [self._query_tool()]
+            return self._all_tools(async_mode=async_mode)
+        return [self._query_tool(async_mode=async_mode)]
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
     def _get_query_agent(self, run_context: RunContext | None) -> "Agent | None":
-        """Sync wrapper for _aget_query_agent."""
-        return asyncio.run(self._aget_query_agent(run_context))
+        """Sync wrapper for _aget_query_agent. Falls back to query() if in event loop."""
+        try:
+            return asyncio.run(self._aget_query_agent(run_context))
+        except RuntimeError:
+            return None
 
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
         """Override to return the sub-agent for streaming; None falls back to aquery()."""
         return None
 
     def setup(self) -> None:
-        """Sync wrapper for asetup."""
-        asyncio.run(self.asetup())
+        """Sync wrapper for asetup. Falls back silently if in event loop."""
+        try:
+            asyncio.run(self.asetup())
+        except RuntimeError:
+            pass
 
     def _run_kwargs_for_sub_agent(self, run_context: RunContext | None) -> dict:
         """Extract kwargs to pass to a sub-agent ``arun()`` from the
@@ -218,12 +225,12 @@ class ContextProvider(ABC):
                 kwargs[attr] = value
         return kwargs
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         """What `mode=default` resolves to. Override in subclasses to set
         the provider's recommended exposure."""
-        return [self._query_tool()]
+        return [self._query_tool(async_mode=async_mode)]
 
-    def _read_write_tools(self) -> list:
+    def _read_write_tools(self, async_mode: bool = False) -> list:
         """Helper for subclasses with both query + update tools.
 
         Honors the ``read`` / ``write`` flags so the same provider
@@ -233,22 +240,29 @@ class ContextProvider(ABC):
         """
         tools: list = []
         if self.read:
-            tools.append(self._query_tool())
+            tools.append(self._query_tool(async_mode=async_mode))
         if self.write:
-            tools.append(self._update_tool())
+            tools.append(self._update_tool(async_mode=async_mode))
         return tools
 
-    def _query_tool(self):
-        """Query tool following Team's delegate_task_to_member pattern.
+    def _query_tool(self, async_mode: bool = False):
+        """Query tool with dual sync/async support.
 
-        Single sync generator that handles both streaming and non-streaming:
-        - stream_sub_agent_events=True: yields sub-agent events, then final answer
-        - stream_sub_agent_events=False: yields final answer only
+        When async_mode=False: returns sync generator for agent.run()
+        When async_mode=True: returns async generator for agent.arun()
         """
+        if async_mode:
+            return self._query_tool_async()
+        return self._query_tool_sync()
+
+    def _query_tool_sync(self):
+        """Sync query tool for agent.run(). Uses sync hooks and iteration."""
         provider = self
 
         @tool(name=self.query_tool_name)
-        def _query(question: str, run_context: RunContext | None = None) -> Iterator[Union[RunOutputEvent, str]]:
+        def _query(
+            question: str, run_context: RunContext | None = None
+        ) -> Iterator[Union[RunOutputEvent, TeamRunOutputEvent, str]]:
             if provider.stream_sub_agent_events:
                 try:
                     provider.setup()
@@ -288,7 +302,6 @@ class ContextProvider(ABC):
                         yield json.dumps(_serialize_answer(answer))
                     return
 
-            # Non-streaming fallback (or no sub-agent configured)
             try:
                 answer = provider.query(question, run_context=run_context)
             except Exception as exc:
@@ -298,7 +311,86 @@ class ContextProvider(ABC):
 
         return _query
 
-    def _update_tool(self):
+    def _query_tool_async(self):
+        """Async query tool for agent.arun(). Uses async hooks and iteration."""
+        provider = self
+
+        @tool(name=self.query_tool_name)
+        async def _query(
+            question: str, run_context: RunContext | None = None
+        ) -> AsyncIterator[Union[RunOutputEvent, TeamRunOutputEvent, str]]:
+            if provider.stream_sub_agent_events:
+                try:
+                    await provider.asetup()
+                except Exception as exc:
+                    yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                    return
+
+                try:
+                    agent = await provider._aget_query_agent(run_context)
+                except Exception as exc:
+                    yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                    return
+
+                if agent is not None:
+                    kwargs = provider._run_kwargs_for_sub_agent(run_context)
+                    run_id = run_context.run_id if run_context else None
+                    final_output: Union[RunOutput, TeamRunOutput, None] = None
+
+                    async for event in agent.arun(
+                        question,
+                        stream=True,
+                        stream_events=True,
+                        yield_run_output=True,
+                        **kwargs,
+                    ):
+                        if isinstance(event, (RunOutput, TeamRunOutput)):
+                            final_output = event
+                            continue
+
+                        event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
+                        yield event
+
+                    if final_output is not None:
+                        from agno.context._utils import answer_from_run
+
+                        answer = answer_from_run(final_output)
+                        yield json.dumps(_serialize_answer(answer))
+                    return
+
+            try:
+                answer = await provider.aquery(question, run_context=run_context)
+            except Exception as exc:
+                yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                return
+            yield json.dumps(_serialize_answer(answer))
+
+        return _query
+
+    def _update_tool(self, async_mode: bool = False):
+        """Update tool with dual sync/async support."""
+        if async_mode:
+            return self._update_tool_async()
+        return self._update_tool_sync()
+
+    def _update_tool_sync(self):
+        """Sync update tool for agent.run()."""
+        provider = self
+
+        @tool(name=self.update_tool_name)
+        def _update(instruction: str, run_context: RunContext | None = None) -> str:
+            try:
+                answer = provider.update(instruction, run_context=run_context)
+            except NotImplementedError:
+                return json.dumps({"error": f"{provider.name} is read-only"})
+            except Exception as exc:
+                return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            return json.dumps(_serialize_answer(answer))
+
+        return _update
+
+    def _update_tool_async(self):
+        """Async update tool for agent.arun()."""
         provider = self
 
         @tool(name=self.update_tool_name)
@@ -313,8 +405,8 @@ class ContextProvider(ABC):
 
         return _update
 
-    def _all_tools(self) -> list:
-        return [self._query_tool()]
+    def _all_tools(self, async_mode: bool = False) -> list:
+        return [self._query_tool(async_mode=async_mode)]
 
 
 def _sanitize_id(raw: str) -> str:

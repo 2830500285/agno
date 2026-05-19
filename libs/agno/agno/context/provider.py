@@ -187,17 +187,26 @@ class ContextProvider(ABC):
     # ------------------------------------------------------------------
 
     def _get_query_agent(self, run_context: RunContext | None) -> "Agent | None":
-        """Sync wrapper for _aget_query_agent. Falls back to query() if in event loop."""
-        try:
-            asyncio.get_running_loop()
-            # Already in async context — can't use asyncio.run, fall back to query()
-            return None
-        except RuntimeError:
-            # No running loop — safe to use asyncio.run
-            return asyncio.run(self._aget_query_agent(run_context))
+        """Return sub-agent for streaming. Override in subclasses.
+
+        Most providers override this directly since their _ensure_agent()
+        methods are synchronous and non-blocking (return cached agents).
+        Only override _aget_query_agent() if you need async setup (e.g. MCP).
+        """
+        return None
 
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
-        """Override to return the sub-agent for streaming; None falls back to aquery()."""
+        """Async variant of _get_query_agent. Tries sync hook first.
+
+        Override this only if you need async setup (e.g. MCP session connect).
+        For providers with sync _ensure_agent(), override _get_query_agent() instead.
+        """
+        # Most providers override _get_query_agent() (sync) because their
+        # _ensure_agent() just returns a cached object — no blocking I/O.
+        # Try that first; it's safe to call from async context.
+        sync_agent = self._get_query_agent(run_context)
+        if sync_agent is not None:
+            return sync_agent
         return None
 
     def setup(self) -> None:
@@ -280,6 +289,8 @@ class ContextProvider(ABC):
                     return
 
                 if agent is not None:
+                    from agno.run.agent import RunContentEvent
+
                     kwargs = provider._run_kwargs_for_sub_agent(run_context)
                     run_id = run_context.run_id if run_context else None
                     final_output: RunOutput | None = None
@@ -293,6 +304,13 @@ class ContextProvider(ABC):
                     ):
                         if isinstance(event, RunOutput):
                             final_output = event
+                            continue
+
+                        # Skip content chunks — they contaminate tool results when
+                        # accumulated alongside the final JSON. The frontend also
+                        # filters RunContent for display. Keep RunStarted/Completed
+                        # as the frontend uses them to group sub-agent events.
+                        if isinstance(event, RunContentEvent):
                             continue
 
                         event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
@@ -336,6 +354,8 @@ class ContextProvider(ABC):
                     return
 
                 if agent is not None:
+                    from agno.run.agent import RunContentEvent
+
                     kwargs = provider._run_kwargs_for_sub_agent(run_context)
                     run_id = run_context.run_id if run_context else None
                     final_output: RunOutput | None = None
@@ -349,6 +369,13 @@ class ContextProvider(ABC):
                     ):
                         if isinstance(event, RunOutput):
                             final_output = event
+                            continue
+
+                        # Skip content chunks — they contaminate tool results when
+                        # accumulated alongside the final JSON. The frontend also
+                        # filters RunContent for display. Keep RunStarted/Completed
+                        # as the frontend uses them to group sub-agent events.
+                        if isinstance(event, RunContentEvent):
                             continue
 
                         event.parent_run_id = getattr(event, "parent_run_id", None) or run_id

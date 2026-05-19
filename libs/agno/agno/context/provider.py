@@ -234,12 +234,6 @@ class ContextProvider(ABC):
 
         if provider.stream_sub_agent_events:
             return self._query_tool_streaming()
-        else:
-            return self._query_tool_simple()
-
-    def _query_tool_simple(self):
-        """Non-streaming query tool. Works with both sync and async agents."""
-        provider = self
 
         @tool(name=self.query_tool_name)
         async def _query(question: str, run_context: RunContext | None = None) -> str:

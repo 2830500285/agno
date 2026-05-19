@@ -90,11 +90,17 @@ class _RaisingQueryProvider(_EchoProvider):
 
 
 class _WritableProvider(_EchoProvider):
+    def update(self, instruction: str, *, run_context: RunContext | None = None) -> Answer:
+        return Answer(text=f"u:{instruction}")
+
     async def aupdate(self, instruction: str, *, run_context: RunContext | None = None) -> Answer:
         return Answer(text=f"u:{instruction}")
 
 
 class _RaisingWritableProvider(_EchoProvider):
+    def update(self, instruction: str, *, run_context: RunContext | None = None) -> Answer:
+        raise ValueError("update boom")
+
     async def aupdate(self, instruction: str, *, run_context: RunContext | None = None) -> Answer:
         raise ValueError("aupdate boom")
 
@@ -476,6 +482,35 @@ async def test_update_tool_catches_aupdate_exceptions():
     assert "aupdate boom" in payload["error"]
 
 
+def test_sync_update_tool_happy_path():
+    """Sync update tool returns JSON via update()."""
+    p = _WritableProvider(id="w")
+    tool_ = p._update_tool(async_mode=False)
+    out = tool_.entrypoint(instruction="add x")
+    payload = json.loads(out)
+    assert payload == {"text": "u:add x"}
+
+
+def test_sync_update_tool_reports_read_only():
+    """Sync update tool reports read-only error."""
+    p = _EchoProvider(id="ro")
+    tool_ = p._update_tool(async_mode=False)
+    out = tool_.entrypoint(instruction="add x")
+    payload = json.loads(out)
+    assert payload == {"error": f"{p.name} is read-only"}
+
+
+def test_sync_update_tool_catches_exceptions():
+    """Sync update tool catches update() exceptions."""
+    p = _RaisingWritableProvider(id="w")
+    tool_ = p._update_tool(async_mode=False)
+    out = tool_.entrypoint(instruction="add x")
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "ValueError" in payload["error"]
+    assert "update boom" in payload["error"]
+
+
 # ---------------------------------------------------------------------------
 # RunContext propagation — the wrapper should thread run_context from the
 # calling agent's auto-injection into provider.aquery / aupdate, and the
@@ -809,6 +844,58 @@ def test_sync_streaming_tool_sets_parent_run_id():
     chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=rc)
 
     assert chunks[0].parent_run_id == "parent-sync-123"
+
+
+def test_sync_streaming_preserves_existing_parent_run_id():
+    """Sync: Events with existing parent_run_id are not overwritten."""
+    from agno.run.agent import RunStartedEvent
+
+    event_with_parent = RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")
+    event_with_parent.parent_run_id = "already-set-parent"
+
+    p = _SubAgentProvider(id="p", stream_sub_agent_events=True, sub_agent_events=[event_with_parent])
+    rc = RunContext(run_id="outer-run-456", session_id="s-1", user_id="u-1")
+    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=rc)
+
+    assert chunks[0].parent_run_id == "already-set-parent"
+
+
+def test_sync_streaming_filters_run_content_events():
+    """Sync: RunContentEvent is filtered out to prevent content contamination."""
+    from agno.run.agent import RunContentEvent, RunStartedEvent
+
+    events = [
+        RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent"),
+        RunContentEvent(run_id="sub-run-1", content="partial content"),
+    ]
+    p = _SubAgentProvider(id="f", stream_sub_agent_events=True, sub_agent_events=events)
+    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+
+    # RunContentEvent should be filtered: 1 RunStartedEvent + 1 final JSON
+    assert len(chunks) == 2
+    assert chunks[0].run_id == "sub-run-1"
+    assert isinstance(chunks[1], str)
+    payload = json.loads(chunks[1])
+    assert "text" in payload
+
+
+def test_sync_streaming_yields_multiple_event_types():
+    """Sync: Yields various event types (except RunContentEvent)."""
+    from agno.run.agent import RunStartedEvent, ToolCallStartedEvent
+
+    events = [
+        RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent"),
+        ToolCallStartedEvent(run_id="sub-run-1", tool=None),
+    ]
+    p = _SubAgentProvider(id="m", stream_sub_agent_events=True, sub_agent_events=events)
+    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+
+    # Should yield: 2 events + 1 final JSON answer
+    assert len(chunks) == 3
+    assert chunks[0].run_id == "sub-run-1"
+    assert hasattr(chunks[1], "tool")
+    payload = json.loads(chunks[2])
+    assert "text" in payload
 
 
 @pytest.mark.asyncio

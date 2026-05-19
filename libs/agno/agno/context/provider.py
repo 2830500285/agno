@@ -191,9 +191,10 @@ class ContextProvider(ABC):
     def _get_query_agent(self, run_context: RunContext | None) -> "Agent | None":
         """Sync wrapper for _aget_query_agent. Falls back to query() if in event loop."""
         try:
-            return asyncio.run(self._aget_query_agent(run_context))
-        except RuntimeError:
+            asyncio.get_running_loop()
             return None
+        except RuntimeError:
+            return asyncio.run(self._aget_query_agent(run_context))
 
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
         """Override to return the sub-agent for streaming; None falls back to aquery()."""
@@ -202,9 +203,9 @@ class ContextProvider(ABC):
     def setup(self) -> None:
         """Sync wrapper for asetup. Falls back silently if in event loop."""
         try:
-            asyncio.run(self.asetup())
+            asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            asyncio.run(self.asetup())
 
     def _run_kwargs_for_sub_agent(self, run_context: RunContext | None) -> dict:
         """Extract kwargs to pass to a sub-agent ``arun()`` from the

@@ -31,15 +31,16 @@ on-demand `learn_context(id)` meta-tool.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Iterator, Union
 
 from agno.context.mode import ContextMode
 from agno.run import RunContext
-from agno.run.agent import RunOutput
+from agno.run.agent import RunOutput, RunOutputEvent
 from agno.team._response import TeamRunOutput
 from agno.tools import tool
 
@@ -186,9 +187,17 @@ class ContextProvider(ABC):
     # Internals
     # ------------------------------------------------------------------
 
+    def _get_query_agent(self, run_context: RunContext | None) -> "Agent | None":
+        """Sync wrapper for _aget_query_agent."""
+        return asyncio.run(self._aget_query_agent(run_context))
+
     async def _aget_query_agent(self, run_context: RunContext | None) -> "Agent | None":
         """Override to return the sub-agent for streaming; None falls back to aquery()."""
         return None
+
+    def setup(self) -> None:
+        """Sync wrapper for asetup."""
+        asyncio.run(self.asetup())
 
     def _run_kwargs_for_sub_agent(self, run_context: RunContext | None) -> dict:
         """Extract kwargs to pass to a sub-agent ``arun()`` from the
@@ -230,72 +239,62 @@ class ContextProvider(ABC):
         return tools
 
     def _query_tool(self):
-        provider = self
+        """Query tool following Team's delegate_task_to_member pattern.
 
-        if provider.stream_sub_agent_events:
-            return self._query_tool_streaming()
-
-        @tool(name=self.query_tool_name)
-        async def _query(question: str, run_context: RunContext | None = None) -> str:
-            try:
-                answer = await provider.aquery(question, run_context=run_context)
-            except Exception as exc:
-                return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
-            return json.dumps(_serialize_answer(answer))
-
-        return _query
-
-    def _query_tool_streaming(self):
-        """Streaming query tool. Yields sub-agent events. Only works with async agents."""
+        Single sync generator that handles both streaming and non-streaming:
+        - stream_sub_agent_events=True: yields sub-agent events, then final answer
+        - stream_sub_agent_events=False: yields final answer only
+        """
         provider = self
 
         @tool(name=self.query_tool_name)
-        async def _query(question: str, run_context: RunContext | None = None):
-            # Run setup before streaming, same as aquery() does
-            try:
-                await provider.asetup()
-            except Exception as exc:
-                yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
-                return
-
-            try:
-                agent = await provider._aget_query_agent(run_context)
-            except Exception as exc:
-                yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
-                return
-
-            if agent is None:
+        def _query(question: str, run_context: RunContext | None = None) -> Iterator[Union[RunOutputEvent, str]]:
+            if provider.stream_sub_agent_events:
                 try:
-                    answer = await provider.aquery(question, run_context=run_context)
+                    provider.setup()
                 except Exception as exc:
                     yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
                     return
-                yield json.dumps(_serialize_answer(answer))
+
+                try:
+                    agent = provider._get_query_agent(run_context)
+                except Exception as exc:
+                    yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                    return
+
+                if agent is not None:
+                    kwargs = provider._run_kwargs_for_sub_agent(run_context)
+                    run_id = run_context.run_id if run_context else None
+                    final_output: Union[RunOutput, TeamRunOutput, None] = None
+
+                    for event in agent.run(
+                        question,
+                        stream=True,
+                        stream_events=True,
+                        yield_run_output=True,
+                        **kwargs,
+                    ):
+                        if isinstance(event, (RunOutput, TeamRunOutput)):
+                            final_output = event
+                            continue
+
+                        event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
+                        yield event
+
+                    if final_output is not None:
+                        from agno.context._utils import answer_from_run
+
+                        answer = answer_from_run(final_output)
+                        yield json.dumps(_serialize_answer(answer))
+                    return
+
+            # Non-streaming fallback (or no sub-agent configured)
+            try:
+                answer = provider.query(question, run_context=run_context)
+            except Exception as exc:
+                yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
                 return
-
-            kwargs = provider._run_kwargs_for_sub_agent(run_context)
-            run_id = run_context.run_id if run_context else None
-            final_output: Union[RunOutput, TeamRunOutput, None] = None
-
-            async for event in agent.arun(
-                question,
-                stream=True,
-                stream_events=True,
-                yield_run_output=True,
-                **kwargs,
-            ):
-                if isinstance(event, (RunOutput, TeamRunOutput)):
-                    final_output = event
-                    continue
-
-                event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
-                yield event
-
-            if final_output is not None:
-                from agno.context._utils import answer_from_run
-
-                answer = answer_from_run(final_output)
-                yield json.dumps(_serialize_answer(answer))
+            yield json.dumps(_serialize_answer(answer))
 
         return _query
 

@@ -17,11 +17,10 @@ from agno.context.provider import _sanitize_id
 from agno.run import RunContext
 
 
-async def _collect_tool_output(tool, **kwargs) -> str:
-    """Collect final string output from a generator tool."""
-    gen = await tool.entrypoint(**kwargs)
+def _collect_tool_output(tool, **kwargs) -> str:
+    """Collect final string output from a sync generator tool."""
     result = ""
-    async for chunk in gen:
+    for chunk in tool.entrypoint(**kwargs):
         if isinstance(chunk, str):
             result = chunk
     return result

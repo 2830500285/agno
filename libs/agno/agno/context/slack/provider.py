@@ -124,7 +124,7 @@ class SlackContextProvider(ContextProvider):
     # calling agent's prompt. Splitting reads/writes keeps each sub-agent
     # scope minimal. mode=tools surfaces raw read tools for direct use.
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return self._read_write_tools()
 
     def _query_tool(self):
@@ -145,7 +145,7 @@ class SlackContextProvider(ContextProvider):
         )
         return update_tool
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         # mode=tools is static: the provider cannot know whether a future
         # tool call will carry Slack interface metadata. Expose the
         # bot-token-compatible read surface so terminal runs never see the

@@ -180,10 +180,10 @@ class WikiContextProvider(ContextProvider):
     # Mode resolution
     # ------------------------------------------------------------------
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return self._read_write_tools()
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         # mode=tools is read-only on purpose. The default surface
         # already gives two distinct tools (query_<id> / update_<id>);
         # collapsing both into a flat Workspace tool list would expose

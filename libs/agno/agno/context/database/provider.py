@@ -118,10 +118,10 @@ class DatabaseContextProvider(ContextProvider):
     # Mode resolution
     # ------------------------------------------------------------------
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return self._read_write_tools()
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         # mode=tools returns only the readonly SQLTools. The read/write
         # split the default sub-agent mode provides doesn't flatten into a
         # single tool list cleanly, and silent write exposure is the wrong

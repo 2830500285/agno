@@ -44,24 +44,21 @@ if TYPE_CHECKING:
 DEFAULT_READ_INSTRUCTIONS = """\
 You answer questions by searching and reading Google Calendar.
 
-## Tools available
+## Tools
 
-- `list_events(time_min, time_max)` — events in a date range
-- `search_events(query)` — free-text search across event titles/descriptions
-- `get_event(event_id)` — full details for one event
-- `check_availability(time_min, time_max)` — busy/free slots
-- `find_available_slots(...)` — suggest meeting times
-- `list_calendars()` — all calendars the user can access
+- `list_events` — upcoming events
+- `search_events` — free-text search across titles/descriptions
+- `get_event` — full details for one event
+- `check_availability` — busy/free slots for attendees
+- `find_available_slots` — suggest meeting times
+- `list_calendars` — all calendars the user can access
 
-## Searching for events
+## When to use which
 
-1. **For "what's on my calendar today/this week"** — use `list_events`
-   with appropriate `time_min` and `time_max` (ISO 8601 format).
-
-2. **For "find meetings about X"** — use `search_events(query="X")`.
-
-3. **For specific event details** — use `get_event(event_id)` after
-   finding the event ID from a list or search.
+1. "What's on my calendar today/this week?" → `list_events`
+2. "Find meetings about X" → `search_events`
+3. "Am I free at 2pm?" → `check_availability`
+4. "When can we meet?" → `find_available_slots`
 
 ## Time zones
 
@@ -81,16 +78,16 @@ You answer questions by searching and reading Google Calendar.
 DEFAULT_WRITE_INSTRUCTIONS = """\
 You manage Google Calendar — searching, reading, and modifying events.
 
-## Tools available
+## Tools
 
-- `create_event(summary, start, end, ...)` — create new event
-- `update_event(event_id, ...)` — modify existing event
-- `delete_event(event_id)` — remove an event
+- `create_event` — create new event
+- `update_event` — modify existing event
+- `delete_event` — remove an event
 - `list_events`, `search_events`, `get_event` — for lookups
 
 ## Before modifying
 
-1. **Always look up first.** Use `get_event(event_id)` or `search_events`
+1. **Always look up first.** Use `get_event` or `search_events`
    to confirm you have the right event before updating or deleting.
 
 2. **Confirm ambiguous requests.** If the user says "move my meeting"
@@ -98,16 +95,12 @@ You manage Google Calendar — searching, reading, and modifying events.
 
 ## Creating events
 
-- **Required:** `summary`, `start`, `end` (ISO 8601 with timezone)
-- **Optional:** `description`, `location`, `attendees`, `reminders`
 - Always confirm the timezone with the user if not explicit.
 - For all-day events, use date format (`2026-05-01`), not datetime.
 
 ## Updating events
 
 - Only specify fields that should change — omit unchanged fields.
-- For attendees: `notify_attendees=True` sends update emails (default).
-  Set to `False` for minor changes that don't need notifications.
 
 ## Deleting events
 
@@ -189,10 +182,10 @@ class GoogleCalendarContextProvider(ContextProvider):
             tools.append(self.update_tool_name)
         return f"`{self.name}`: {', '.join(f'`{t}`' for t in tools)} for calendar operations."
 
-    def _default_tools(self) -> list:
-        return self._read_write_tools()
+    def _default_tools(self, async_mode: bool = False) -> list:
+        return self._read_write_tools(async_mode=async_mode)
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         return [self._ensure_read_toolkit()]
 
     def _ensure_read_toolkit(self) -> GoogleCalendarTools:
@@ -204,9 +197,6 @@ class GoogleCalendarContextProvider(ContextProvider):
         if self._write_toolkit is None:
             self._write_toolkit = self._build_write_toolkit()
         return self._write_toolkit
-
-    def _get_query_agent(self, run_context):
-        return self._ensure_read_agent()
 
     def _ensure_read_agent(self) -> Agent:
         if self._read_agent is None:

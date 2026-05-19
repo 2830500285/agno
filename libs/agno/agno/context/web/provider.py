@@ -82,10 +82,10 @@ class WebContextProvider(ContextProvider):
     # gets a synthesized, cited answer back instead of orchestrating raw
     # search + fetch itself. mode=tools still surfaces the backend's
     # tools flat for callers that want to drive search directly.
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return [self._query_tool()]
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         return self.backend.get_tools()
 
     # ------------------------------------------------------------------

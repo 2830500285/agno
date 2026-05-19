@@ -175,12 +175,12 @@ class MCPContextProvider(ContextProvider):
     # Mode resolution
     # ------------------------------------------------------------------
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         # Always wrap behind a sub-agent — two MCP servers with a shared
         # tool name (e.g. `search`) would otherwise collide on the caller.
-        return [self._query_tool()]
+        return [self._query_tool(async_mode=async_mode)]
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         tools = self._tools
         if tools is None:
             # Return an unconnected toolkit — caller is expected to have

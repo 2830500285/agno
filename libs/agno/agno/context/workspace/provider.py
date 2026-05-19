@@ -85,10 +85,10 @@ class WorkspaceContextProvider(ContextProvider):
     # Mode resolution
     # ------------------------------------------------------------------
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return [self._query_tool()]
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         return [self._build_workspace_tools()]
 
     # ------------------------------------------------------------------

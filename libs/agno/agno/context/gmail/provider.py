@@ -209,10 +209,10 @@ class GmailContextProvider(ContextProvider):
             tools.append(self.update_tool_name)
         return f"`{self.name}`: {', '.join(f'`{t}`' for t in tools)} for email operations."
 
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return self._read_write_tools()
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         return [self._ensure_read_toolkit()]
 
     def _ensure_read_toolkit(self) -> GmailTools:

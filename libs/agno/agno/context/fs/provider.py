@@ -79,10 +79,10 @@ class FilesystemContextProvider(ContextProvider):
     # other file-like toolkits, and agno's tool resolver dedupes by name
     # across the whole list (silently dropping the second toolkit).
     # mode=tools only works when FS is the sole file-like provider.
-    def _default_tools(self) -> list:
+    def _default_tools(self, async_mode: bool = False) -> list:
         return [self._query_tool()]
 
-    def _all_tools(self) -> list:
+    def _all_tools(self, async_mode: bool = False) -> list:
         return [_build_file_tools(self.root, exclude_patterns=self.exclude_patterns)]
 
     # ------------------------------------------------------------------

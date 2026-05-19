@@ -406,26 +406,34 @@ class _SubAgentProvider(_EchoProvider):
         super().__init__(**kwargs)
         self._sub_agent_events = sub_agent_events or []
         self._aquery_called = False
+        self._aget_query_agent_called = False
+        self._asetup_called = False
+
+    async def asetup(self):
+        self._asetup_called = True
 
     async def aquery(self, question: str, *, run_context=None) -> Answer:
         self._aquery_called = True
         return Answer(text=f"aquery:{question}")
 
     async def _aget_query_agent(self, run_context=None):
+        self._aget_query_agent_called = True
         if not self._sub_agent_events:
             return None
         return _MockSubAgent(self._sub_agent_events)
 
 
 class _MockSubAgent:
-    """Mock agent that yields predefined events."""
+    """Mock agent that yields predefined events and captures call kwargs."""
 
     def __init__(self, events):
         self._events = events
+        self.last_call_kwargs = None
 
     async def arun(self, question, **kwargs):
         from agno.run.agent import RunOutput
 
+        self.last_call_kwargs = kwargs
         for event in self._events:
             yield event
         yield RunOutput(run_id="sub-run-1", content=f"sub-agent answer: {question}")
@@ -441,23 +449,42 @@ async def _collect_streaming_chunks(tool, **kwargs) -> list:
 
 @pytest.mark.asyncio
 async def test_streaming_tool_yields_sub_agent_events():
-    """When sub-agent is configured, streaming tool yields its events."""
+    """When sub-agent is configured, streaming tool yields its events with correct identity."""
     from agno.run.agent import RunStartedEvent
 
-    mock_events = [
-        RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent"),
-    ]
-    p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
+    mock_event = RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")
+    p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=[mock_event])
     chunks = await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
 
     # Should yield: 1 event + 1 final JSON answer
     assert len(chunks) == 2
-    # First is event with parent_run_id set
-    assert hasattr(chunks[0], "parent_run_id")
+    # First is the exact event we passed in (with parent_run_id added)
+    assert chunks[0].run_id == "sub-run-1"
+    assert chunks[0].agent_id == "sub-agent"
     # Last is JSON answer
     payload = json.loads(chunks[1])
     assert "text" in payload
     assert "sub-agent answer" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_passes_correct_flags_to_sub_agent():
+    """Streaming tool passes stream=True, stream_events=True, yield_run_output=True."""
+    from agno.run.agent import RunStartedEvent
+
+    mock_event = RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")
+    mock_agent = _MockSubAgent([mock_event])
+
+    class _KwargsCapturingProvider(_SubAgentProvider):
+        async def _aget_query_agent(self, run_context=None):
+            return mock_agent
+
+    p = _KwargsCapturingProvider(id="e", stream_sub_agent_events=True)
+    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+
+    assert mock_agent.last_call_kwargs["stream"] is True
+    assert mock_agent.last_call_kwargs["stream_events"] is True
+    assert mock_agent.last_call_kwargs["yield_run_output"] is True
 
 
 @pytest.mark.asyncio
@@ -470,8 +497,31 @@ async def test_streaming_tool_sets_parent_run_id_on_events():
     rc = RunContext(run_id="parent-run-123", session_id="s-1", user_id="u-1")
     chunks = await _collect_streaming_chunks(p._query_tool(), question="test", run_context=rc)
 
-    # The event should have parent_run_id set to the parent's run_id
     assert chunks[0].parent_run_id == "parent-run-123"
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_calls_asetup_before_running():
+    """Streaming tool calls asetup() before running sub-agent, same as aquery()."""
+    from agno.run.agent import RunStartedEvent
+
+    mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
+    p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
+    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+
+    assert p._asetup_called
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
+    """When sub-agent streams, aquery() is bypassed entirely."""
+    from agno.run.agent import RunStartedEvent
+
+    mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
+    p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
+    await _collect_streaming_chunks(p._query_tool(), question="test", run_context=None)
+
+    assert not p._aquery_called
 
 
 @pytest.mark.asyncio
@@ -486,11 +536,10 @@ async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
 
 
 @pytest.mark.asyncio
-async def test_simple_tool_always_calls_aquery():
-    """Non-streaming tool always uses aquery(), never _aget_query_agent."""
+async def test_simple_tool_never_calls_aget_query_agent():
+    """Non-streaming tool uses aquery() directly, never checks for sub-agent."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=False, sub_agent_events=[])
-    result = await p._query_tool().entrypoint(question="hello")
+    await p._query_tool().entrypoint(question="hello")
 
     assert p._aquery_called
-    payload = json.loads(result)
-    assert payload == {"text": "aquery:hello"}
+    assert not p._aget_query_agent_called

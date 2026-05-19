@@ -257,6 +257,13 @@ class ContextProvider(ABC):
 
         @tool(name=self.query_tool_name)
         async def _query(question: str, run_context: RunContext | None = None):
+            # Run setup before streaming, same as aquery() does
+            try:
+                await provider.asetup()
+            except Exception as exc:
+                yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                return
+
             try:
                 agent = await provider._aget_query_agent(run_context)
             except Exception as exc:

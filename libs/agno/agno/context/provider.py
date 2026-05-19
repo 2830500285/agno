@@ -201,13 +201,9 @@ class ContextProvider(ABC):
         Override this only if you need async setup (e.g. MCP session connect).
         For providers with sync _ensure_agent(), override _get_query_agent() instead.
         """
-        # Most providers override _get_query_agent() (sync) because their
-        # _ensure_agent() just returns a cached object — no blocking I/O.
-        # Try that first; it's safe to call from async context.
-        sync_agent = self._get_query_agent(run_context)
-        if sync_agent is not None:
-            return sync_agent
-        return None
+        # Most providers implement sync _get_query_agent() — their _ensure_agent()
+        # returns a cached agent with no I/O. Safe to call from async context.
+        return self._get_query_agent(run_context)
 
     def setup(self) -> None:
         """Sync wrapper for asetup. Falls back silently if in event loop."""

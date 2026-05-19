@@ -873,3 +873,80 @@ async def test_streaming_yields_multiple_event_types():
     assert hasattr(chunks[1], "tool")  # ToolCallStartedEvent has tool field
     payload = json.loads(chunks[2])
     assert "text" in payload
+
+
+# ---------------------------------------------------------------------------
+# Exception handling in streaming paths
+# ---------------------------------------------------------------------------
+
+
+class _FailingSetupProvider(_EchoProvider):
+    """Provider that raises in setup/asetup."""
+
+    def setup(self):
+        raise ConnectionError("Failed to connect to backend")
+
+    async def asetup(self):
+        raise ConnectionError("Failed to connect to backend")
+
+
+class _FailingAgentHookProvider(_EchoProvider):
+    """Provider that raises in _get_query_agent/_aget_query_agent."""
+
+    def setup(self):
+        pass
+
+    async def asetup(self):
+        pass
+
+    def _get_query_agent(self, run_context=None):
+        raise RuntimeError("Agent initialization failed")
+
+    async def _aget_query_agent(self, run_context=None):
+        raise RuntimeError("Agent initialization failed")
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_handles_asetup_exception():
+    """Async streaming yields error JSON when asetup() raises."""
+    p = _FailingSetupProvider(id="fs", stream_sub_agent_events=True)
+    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="test")
+
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "ConnectionError" in payload["error"]
+    assert "Failed to connect" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_handles_aget_query_agent_exception():
+    """Async streaming yields error JSON when _aget_query_agent() raises."""
+    p = _FailingAgentHookProvider(id="fa", stream_sub_agent_events=True)
+    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="test")
+
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "RuntimeError" in payload["error"]
+    assert "Agent initialization failed" in payload["error"]
+
+
+def test_sync_streaming_handles_setup_exception():
+    """Sync streaming yields error JSON when setup() raises."""
+    p = _FailingSetupProvider(id="fs", stream_sub_agent_events=True)
+    out = _collect_tool_output_sync(p._query_tool(async_mode=False), question="test")
+
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "ConnectionError" in payload["error"]
+    assert "Failed to connect" in payload["error"]
+
+
+def test_sync_streaming_handles_get_query_agent_exception():
+    """Sync streaming yields error JSON when _get_query_agent() raises."""
+    p = _FailingAgentHookProvider(id="fa", stream_sub_agent_events=True)
+    out = _collect_tool_output_sync(p._query_tool(async_mode=False), question="test")
+
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "RuntimeError" in payload["error"]
+    assert "Agent initialization failed" in payload["error"]

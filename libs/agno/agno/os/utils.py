@@ -1435,6 +1435,9 @@ def format_tools(agent_tools: List[Union[Dict[str, Any], Toolkit, Function, Call
                 for func in tool.get_tools():
                     if isinstance(func, Function):
                         formatted_tools.append(func.to_dict())
+                    elif isinstance(func, Toolkit):
+                        for _, f in func.functions.items():
+                            formatted_tools.append(f.to_dict())
             elif isinstance(tool, Toolkit):
                 for _, f in tool.functions.items():
                     formatted_tools.append(f.to_dict())

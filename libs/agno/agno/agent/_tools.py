@@ -404,6 +404,30 @@ def parse_tools(
         elif isinstance(tool, ContextProvider):
             # Expand provider and process each function inline (like Toolkit)
             for _func in tool.get_tools(async_mode=async_mode):
+                if isinstance(_func, Toolkit):
+                    # mode=tools returns Toolkit — expand like the Toolkit branch
+                    toolkit_functions = _func.get_async_functions() if async_mode else _func.get_functions()
+                    for name, tk_func in toolkit_functions.items():
+                        if name in _function_names:
+                            log_warning(
+                                f"Duplicate tool name '{name}' from provider toolkit "
+                                f"already registered on agent; skipping the duplicate."
+                            )
+                            continue
+                        _function_names.append(name)
+                        tk_func = tk_func.model_copy(deep=True)
+                        tk_func._agent = agent
+                        if agent._team is not None:
+                            tk_func._team = agent._team
+                        effective_strict = strict if tk_func.strict is None else tk_func.strict
+                        tk_func.process_entrypoint(strict=effective_strict)
+                        if strict and tk_func.strict is None:
+                            tk_func.strict = True
+                        if agent.tool_hooks is not None:
+                            tk_func.tool_hooks = agent.tool_hooks
+                        _functions.append(tk_func)
+                        log_debug(f"Added tool {name} from ContextProvider toolkit")
+                    continue
                 if not isinstance(_func, Function):
                     continue
                 if _func.name in _function_names:

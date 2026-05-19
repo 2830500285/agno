@@ -232,6 +232,29 @@ class ContextProvider(ABC):
     def _query_tool(self):
         provider = self
 
+        if provider.stream_sub_agent_events:
+            return self._query_tool_streaming()
+        else:
+            return self._query_tool_simple()
+
+    def _query_tool_simple(self):
+        """Non-streaming query tool. Works with both sync and async agents."""
+        provider = self
+
+        @tool(name=self.query_tool_name)
+        async def _query(question: str, run_context: RunContext | None = None) -> str:
+            try:
+                answer = await provider.aquery(question, run_context=run_context)
+            except Exception as exc:
+                return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            return json.dumps(_serialize_answer(answer))
+
+        return _query
+
+    def _query_tool_streaming(self):
+        """Streaming query tool. Yields sub-agent events. Only works with async agents."""
+        provider = self
+
         @tool(name=self.query_tool_name)
         async def _query(question: str, run_context: RunContext | None = None):
             try:
@@ -256,20 +279,17 @@ class ContextProvider(ABC):
             async for event in agent.arun(
                 question,
                 stream=True,
-                stream_events=provider.stream_sub_agent_events,
+                stream_events=True,
                 yield_run_output=True,
                 **kwargs,
             ):
-                # Do NOT break out of the loop, AsyncIterator needs to exit properly
                 if isinstance(event, (RunOutput, TeamRunOutput)):
                     final_output = event
-                    continue  # Don't yield RunOutput, only yield events
+                    continue
 
-                # Yield the sub-agent event directly
                 event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
                 yield event
 
-            # Convert final output to JSON answer
             if final_output is not None:
                 from agno.context._utils import answer_from_run
 

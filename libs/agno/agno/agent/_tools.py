@@ -76,6 +76,19 @@ def raise_if_async_tools(agent: Agent) -> None:
                 )
 
 
+def _expand_context_providers(tools: list, async_mode: bool) -> list:
+    """Expand ContextProvider instances to their tools with correct async_mode."""
+    from agno.context.provider import ContextProvider
+
+    expanded: list = []
+    for tool in tools:
+        if isinstance(tool, ContextProvider):
+            expanded.extend(tool.get_tools(async_mode=async_mode))
+        else:
+            expanded.append(tool)
+    return expanded
+
+
 def _raise_if_async_tools_in_list(tools: list) -> None:
     """Raise if any tools in a concrete list are async."""
     from inspect import iscoroutinefunction
@@ -131,7 +144,7 @@ def get_tools(
 
     # Add provided tools
     if resolved_tools is not None:
-        # If not running in async mode, raise if any tool is async
+        resolved_tools = _expand_context_providers(resolved_tools, async_mode=False)
         _raise_if_async_tools_in_list(resolved_tools)
         agent_tools.extend(resolved_tools)
 
@@ -238,6 +251,7 @@ async def aget_tools(
 
     # Add provided tools
     if resolved_tools is not None:
+        resolved_tools = _expand_context_providers(resolved_tools, async_mode=True)
         for tool in resolved_tools:
             # Alternate method of using isinstance(tool, (MCPTools, MultiMCPTools)) to avoid imports
             is_mcp_tool = hasattr(type(tool), "__mro__") and any(

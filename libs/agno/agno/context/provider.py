@@ -41,9 +41,7 @@ from typing import TYPE_CHECKING, AsyncIterator, Iterator, Union
 from agno.context.mode import ContextMode
 from agno.run import RunContext
 from agno.run.agent import RunOutput, RunOutputEvent
-from agno.team import TeamRunOutput
 from agno.tools import tool
-from agno.team._response import TeamRunOutputEvent
 
 if TYPE_CHECKING:
     from agno.agent import Agent
@@ -263,7 +261,7 @@ class ContextProvider(ABC):
         @tool(name=self.query_tool_name)
         def _query(
             question: str, run_context: RunContext | None = None
-        ) -> Iterator[Union[RunOutputEvent, TeamRunOutputEvent, str]]:
+        ) -> Iterator[Union[RunOutputEvent, str]]:
             if provider.stream_sub_agent_events:
                 try:
                     provider.setup()
@@ -280,7 +278,7 @@ class ContextProvider(ABC):
                 if agent is not None:
                     kwargs = provider._run_kwargs_for_sub_agent(run_context)
                     run_id = run_context.run_id if run_context else None
-                    final_output: Union[RunOutput, TeamRunOutput, None] = None
+                    final_output: RunOutput | None = None
 
                     for event in agent.run(
                         question,
@@ -289,7 +287,7 @@ class ContextProvider(ABC):
                         yield_run_output=True,
                         **kwargs,
                     ):
-                        if isinstance(event, (RunOutput, TeamRunOutput)):
+                        if isinstance(event, RunOutput):
                             final_output = event
                             continue
 
@@ -319,7 +317,7 @@ class ContextProvider(ABC):
         @tool(name=self.query_tool_name)
         async def _query(
             question: str, run_context: RunContext | None = None
-        ) -> AsyncIterator[Union[RunOutputEvent, TeamRunOutputEvent, str]]:
+        ) -> AsyncIterator[Union[RunOutputEvent, str]]:
             if provider.stream_sub_agent_events:
                 try:
                     await provider.asetup()
@@ -336,7 +334,7 @@ class ContextProvider(ABC):
                 if agent is not None:
                     kwargs = provider._run_kwargs_for_sub_agent(run_context)
                     run_id = run_context.run_id if run_context else None
-                    final_output: Union[RunOutput, TeamRunOutput, None] = None
+                    final_output: RunOutput | None = None
 
                     async for event in agent.arun(
                         question,
@@ -345,7 +343,7 @@ class ContextProvider(ABC):
                         yield_run_output=True,
                         **kwargs,
                     ):
-                        if isinstance(event, (RunOutput, TeamRunOutput)):
+                        if isinstance(event, RunOutput):
                             final_output = event
                             continue
 

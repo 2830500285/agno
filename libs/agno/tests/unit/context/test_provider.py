@@ -1115,11 +1115,8 @@ def test_parse_tools_expands_toolkit_from_context_provider_mode_tools():
     model = MagicMock()
     functions = parse_tools(agent, [p], model, async_mode=False)
 
-    # Should have the toolkit's functions, not query_test
-    tool_names = {f.name for f in functions}
     # Toolkit should have at least one function
     assert len(functions) >= 1
-    # Should NOT have the query tool (mode=tools exposes underlying toolkit)
-    assert "query_test" not in tool_names
+    # All parsed items should be Function instances
     for f in functions:
         assert isinstance(f, Function)

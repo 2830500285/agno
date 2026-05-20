@@ -36,8 +36,9 @@ class FilesystemContextProvider(ContextProvider):
         mode: ContextMode = ContextMode.default,
         model: Model | None = None,
         exclude_patterns: list[str] | None = None,
+        stream_sub_agent_events: bool = True,
     ) -> None:
-        super().__init__(id=id, name=name, mode=mode, model=model)
+        super().__init__(id=id, name=name, mode=mode, model=model, stream_sub_agent_events=stream_sub_agent_events)
         self.root = Path(root).expanduser().resolve()
         self.instructions_text = instructions if instructions is not None else DEFAULT_FS_INSTRUCTIONS
         self.exclude_patterns = exclude_patterns
@@ -80,7 +81,7 @@ class FilesystemContextProvider(ContextProvider):
     # across the whole list (silently dropping the second toolkit).
     # mode=tools only works when FS is the sole file-like provider.
     def _default_tools(self, async_mode: bool = False) -> list:
-        return [self._query_tool(async_mode=async_mode)]
+        return [self._build_query_tool(async_mode=async_mode)]
 
     def _all_tools(self, async_mode: bool = False) -> list:
         return [_build_file_tools(self.root, exclude_patterns=self.exclude_patterns)]

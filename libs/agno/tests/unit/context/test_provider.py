@@ -391,7 +391,7 @@ def test_mode_agent_silently_ignores_read_false():
 @pytest.mark.asyncio
 async def test_query_tool_serializes_answer_text():
     p = _EchoProvider(id="e")
-    query_tool = p._query_tool(async_mode=True)
+    query_tool = p._build_query_tool(async_mode=True)
     out = await _collect_tool_output_async(query_tool, question="hello")
     payload = json.loads(out)
     # Empty `results` is omitted — no provider populates Document
@@ -403,7 +403,7 @@ async def test_query_tool_serializes_answer_text():
 @pytest.mark.asyncio
 async def test_query_tool_catches_aquery_exceptions():
     p = _RaisingQueryProvider(id="e")
-    query_tool = p._query_tool(async_mode=True)
+    query_tool = p._build_query_tool(async_mode=True)
     out = await _collect_tool_output_async(query_tool, question="hello")
     payload = json.loads(out)
     # Error is reported as a string — the calling agent sees it but
@@ -421,7 +421,7 @@ async def test_query_tool_omits_both_when_answer_is_empty():
         async def aquery(self, question: str, *, run_context: RunContext | None = None) -> Answer:
             return Answer()
 
-    tool_ = _DocsOnly(id="e")._query_tool(async_mode=True)
+    tool_ = _DocsOnly(id="e")._build_query_tool(async_mode=True)
     out = await _collect_tool_output_async(tool_, question="hello")
     payload = json.loads(out)
     assert payload == {}
@@ -439,7 +439,7 @@ async def test_query_tool_includes_results_when_populated():
                 text="see results",
             )
 
-    tool_ = _WithDocs(id="e")._query_tool(async_mode=True)
+    tool_ = _WithDocs(id="e")._build_query_tool(async_mode=True)
     out = await _collect_tool_output_async(tool_, question="hello")
     payload = json.loads(out)
     assert payload["text"] == "see results"
@@ -454,7 +454,7 @@ async def test_query_tool_includes_results_when_populated():
 @pytest.mark.asyncio
 async def test_update_tool_happy_path():
     p = _WritableProvider(id="w")
-    tool_ = p._update_tool(async_mode=True)
+    tool_ = p._build_update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert payload == {"text": "u:add x"}
@@ -463,7 +463,7 @@ async def test_update_tool_happy_path():
 @pytest.mark.asyncio
 async def test_update_tool_reports_read_only_when_not_overridden():
     p = _EchoProvider(id="ro")  # no aupdate override -> base raises NotImplementedError
-    tool_ = p._update_tool(async_mode=True)
+    tool_ = p._build_update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     # Specifically a read-only message, not a generic exception string —
@@ -474,7 +474,7 @@ async def test_update_tool_reports_read_only_when_not_overridden():
 @pytest.mark.asyncio
 async def test_update_tool_catches_aupdate_exceptions():
     p = _RaisingWritableProvider(id="w")
-    tool_ = p._update_tool(async_mode=True)
+    tool_ = p._build_update_tool(async_mode=True)
     out = await tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert "error" in payload
@@ -485,7 +485,7 @@ async def test_update_tool_catches_aupdate_exceptions():
 def test_sync_update_tool_happy_path():
     """Sync update tool returns JSON via update()."""
     p = _WritableProvider(id="w")
-    tool_ = p._update_tool(async_mode=False)
+    tool_ = p._build_update_tool(async_mode=False)
     out = tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert payload == {"text": "u:add x"}
@@ -494,7 +494,7 @@ def test_sync_update_tool_happy_path():
 def test_sync_update_tool_reports_read_only():
     """Sync update tool reports read-only error."""
     p = _EchoProvider(id="ro")
-    tool_ = p._update_tool(async_mode=False)
+    tool_ = p._build_update_tool(async_mode=False)
     out = tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert payload == {"error": f"{p.name} is read-only"}
@@ -503,7 +503,7 @@ def test_sync_update_tool_reports_read_only():
 def test_sync_update_tool_catches_exceptions():
     """Sync update tool catches update() exceptions."""
     p = _RaisingWritableProvider(id="w")
-    tool_ = p._update_tool(async_mode=False)
+    tool_ = p._build_update_tool(async_mode=False)
     out = tool_.entrypoint(instruction="add x")
     payload = json.loads(out)
     assert "error" in payload
@@ -528,7 +528,7 @@ async def test_query_tool_forwards_run_context_to_aquery():
             return Answer(text=f"q:{question}")
 
     p = _Captor(id="c")
-    query_tool = p._query_tool(async_mode=True)
+    query_tool = p._build_query_tool(async_mode=True)
     rc = RunContext(run_id="r-1", user_id="u-1", session_id="s-1", metadata={"action_token": "xoxa-abc"})
     # Framework would normally inject run_context via Function._run_context;
     # calling the entrypoint directly with run_context= simulates that path.
@@ -546,7 +546,7 @@ async def test_update_tool_forwards_run_context_to_aupdate():
             return Answer(text=f"u:{instruction}")
 
     p = _WCaptor(id="w")
-    update_tool = p._update_tool(async_mode=True)
+    update_tool = p._build_update_tool(async_mode=True)
     rc = RunContext(run_id="r-2", session_id="s-2", user_id="u-2", dependencies={"db_url": "postgres://..."})
     await update_tool.entrypoint(instruction="write x", run_context=rc)
     assert captured["run_context"] is rc
@@ -617,7 +617,7 @@ async def test_base_asetup_is_idempotent():
 def test_simple_tool_returns_string_directly():
     """Non-streaming tool returns JSON string via query()."""
     p = _EchoProvider(id="e", stream_sub_agent_events=False)
-    out = _collect_tool_output_sync(p._query_tool(), question="hello")
+    out = _collect_tool_output_sync(p._build_query_tool(async_mode=False), question="hello")
     payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
@@ -625,7 +625,7 @@ def test_simple_tool_returns_string_directly():
 def test_streaming_tool_yields_final_answer():
     """Streaming tool yields JSON answer when no sub-agent is configured."""
     p = _EchoProvider(id="e", stream_sub_agent_events=True)
-    out = _collect_tool_output_sync(p._query_tool(), question="hello")
+    out = _collect_tool_output_sync(p._build_query_tool(async_mode=False), question="hello")
     payload = json.loads(out)
     assert payload == {"text": "q:hello"}
 
@@ -702,7 +702,7 @@ async def test_streaming_tool_yields_sub_agent_events():
 
     mock_event = RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=[mock_event])
-    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    chunks = await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     # Should yield: 1 event + 1 final JSON answer
     assert len(chunks) == 2
@@ -728,7 +728,7 @@ async def test_streaming_tool_passes_correct_flags_to_sub_agent():
             return mock_agent
 
     p = _KwargsCapturingProvider(id="e", stream_sub_agent_events=True)
-    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     assert mock_agent.last_call_kwargs["stream"] is True
     assert mock_agent.last_call_kwargs["stream_events"] is True
@@ -743,7 +743,7 @@ async def test_streaming_tool_sets_parent_run_id_on_events():
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
     rc = RunContext(run_id="parent-run-123", session_id="s-1", user_id="u-1")
-    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=rc)
+    chunks = await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=rc)
 
     assert chunks[0].parent_run_id == "parent-run-123"
 
@@ -755,7 +755,7 @@ async def test_streaming_tool_calls_asetup_before_running():
 
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
-    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     assert p._asetup_called
 
@@ -767,7 +767,7 @@ async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
 
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=mock_events)
-    await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     assert not p._aquery_called
 
@@ -776,7 +776,7 @@ async def test_streaming_tool_does_not_call_aquery_when_sub_agent_exists():
 async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
     """When _aget_query_agent returns None, streaming tool calls aquery()."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=True, sub_agent_events=None)
-    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="hello")
+    out = await _collect_tool_output_async(p._build_query_tool(async_mode=True), question="hello")
 
     assert p._aquery_called
     payload = json.loads(out)
@@ -787,7 +787,7 @@ async def test_streaming_tool_falls_back_to_aquery_when_no_sub_agent():
 async def test_simple_tool_never_calls_aget_query_agent():
     """Non-streaming tool uses aquery() directly, never checks for sub-agent."""
     p = _SubAgentProvider(id="e", stream_sub_agent_events=False, sub_agent_events=[])
-    await _collect_tool_output_async(p._query_tool(async_mode=True), question="hello")
+    await _collect_tool_output_async(p._build_query_tool(async_mode=True), question="hello")
 
     assert p._aquery_called
     assert not p._aget_query_agent_called
@@ -812,7 +812,7 @@ def test_sync_streaming_tool_yields_sub_agent_events():
 
     mock_event = RunStartedEvent(run_id="sub-run-sync", agent_id="sync-agent")
     p = _SubAgentProvider(id="s", stream_sub_agent_events=True, sub_agent_events=[mock_event])
-    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+    chunks = _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=None)
 
     # Should yield: 1 event + 1 final JSON answer
     assert len(chunks) == 2
@@ -828,7 +828,7 @@ def test_sync_streaming_tool_calls_setup_before_running():
 
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="s", stream_sub_agent_events=True, sub_agent_events=mock_events)
-    _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+    _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=None)
 
     assert p._setup_called
     assert p._get_query_agent_called
@@ -841,7 +841,7 @@ def test_sync_streaming_tool_sets_parent_run_id():
     mock_events = [RunStartedEvent(run_id="sub-run-1", agent_id="sub-agent")]
     p = _SubAgentProvider(id="s", stream_sub_agent_events=True, sub_agent_events=mock_events)
     rc = RunContext(run_id="parent-sync-123", session_id="s-1", user_id="u-1")
-    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=rc)
+    chunks = _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=rc)
 
     assert chunks[0].parent_run_id == "parent-sync-123"
 
@@ -855,7 +855,7 @@ def test_sync_streaming_preserves_existing_parent_run_id():
 
     p = _SubAgentProvider(id="p", stream_sub_agent_events=True, sub_agent_events=[event_with_parent])
     rc = RunContext(run_id="outer-run-456", session_id="s-1", user_id="u-1")
-    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=rc)
+    chunks = _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=rc)
 
     assert chunks[0].parent_run_id == "already-set-parent"
 
@@ -869,7 +869,7 @@ def test_sync_streaming_filters_run_content_events():
         RunContentEvent(run_id="sub-run-1", content="partial content"),
     ]
     p = _SubAgentProvider(id="f", stream_sub_agent_events=True, sub_agent_events=events)
-    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+    chunks = _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=None)
 
     # RunContentEvent should be filtered: 1 RunStartedEvent + 1 final JSON
     assert len(chunks) == 2
@@ -888,7 +888,7 @@ def test_sync_streaming_yields_multiple_event_types():
         ToolCallStartedEvent(run_id="sub-run-1", tool=None),
     ]
     p = _SubAgentProvider(id="m", stream_sub_agent_events=True, sub_agent_events=events)
-    chunks = _collect_sync_streaming_chunks(p._query_tool(async_mode=False), question="test", run_context=None)
+    chunks = _collect_sync_streaming_chunks(p._build_query_tool(async_mode=False), question="test", run_context=None)
 
     # Should yield: 2 events + 1 final JSON answer
     assert len(chunks) == 3
@@ -909,7 +909,7 @@ async def test_streaming_preserves_existing_parent_run_id():
 
     p = _SubAgentProvider(id="p", stream_sub_agent_events=True, sub_agent_events=[event_with_parent])
     rc = RunContext(run_id="outer-run-456", session_id="s-1", user_id="u-1")
-    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=rc)
+    chunks = await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=rc)
 
     # Existing parent_run_id should be preserved via the `or run_id` fallback
     assert chunks[0].parent_run_id == "already-set-parent"
@@ -931,7 +931,7 @@ async def test_streaming_filters_run_content_events():
         RunContentEvent(run_id="sub-run-1", content="partial content"),
     ]
     p = _SubAgentProvider(id="f", stream_sub_agent_events=True, sub_agent_events=events)
-    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    chunks = await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     # RunContentEvent should be filtered, so we get: 1 RunStartedEvent + 1 final JSON
     assert len(chunks) == 2
@@ -952,7 +952,7 @@ async def test_streaming_yields_multiple_event_types():
         ToolCallStartedEvent(run_id="sub-run-1", tool=None),
     ]
     p = _SubAgentProvider(id="m", stream_sub_agent_events=True, sub_agent_events=events)
-    chunks = await _collect_streaming_chunks(p._query_tool(async_mode=True), question="test", run_context=None)
+    chunks = await _collect_streaming_chunks(p._build_query_tool(async_mode=True), question="test", run_context=None)
 
     # Should yield: 2 events + 1 final JSON answer
     assert len(chunks) == 3
@@ -997,7 +997,7 @@ class _FailingAgentHookProvider(_EchoProvider):
 async def test_async_streaming_handles_asetup_exception():
     """Async streaming yields error JSON when asetup() raises."""
     p = _FailingSetupProvider(id="fs", stream_sub_agent_events=True)
-    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="test")
+    out = await _collect_tool_output_async(p._build_query_tool(async_mode=True), question="test")
 
     payload = json.loads(out)
     assert "error" in payload
@@ -1009,7 +1009,7 @@ async def test_async_streaming_handles_asetup_exception():
 async def test_async_streaming_handles_aget_query_agent_exception():
     """Async streaming yields error JSON when _aget_query_agent() raises."""
     p = _FailingAgentHookProvider(id="fa", stream_sub_agent_events=True)
-    out = await _collect_tool_output_async(p._query_tool(async_mode=True), question="test")
+    out = await _collect_tool_output_async(p._build_query_tool(async_mode=True), question="test")
 
     payload = json.loads(out)
     assert "error" in payload
@@ -1020,7 +1020,7 @@ async def test_async_streaming_handles_aget_query_agent_exception():
 def test_sync_streaming_handles_setup_exception():
     """Sync streaming yields error JSON when setup() raises."""
     p = _FailingSetupProvider(id="fs", stream_sub_agent_events=True)
-    out = _collect_tool_output_sync(p._query_tool(async_mode=False), question="test")
+    out = _collect_tool_output_sync(p._build_query_tool(async_mode=False), question="test")
 
     payload = json.loads(out)
     assert "error" in payload
@@ -1031,9 +1031,93 @@ def test_sync_streaming_handles_setup_exception():
 def test_sync_streaming_handles_get_query_agent_exception():
     """Sync streaming yields error JSON when _get_query_agent() raises."""
     p = _FailingAgentHookProvider(id="fa", stream_sub_agent_events=True)
-    out = _collect_tool_output_sync(p._query_tool(async_mode=False), question="test")
+    out = _collect_tool_output_sync(p._build_query_tool(async_mode=False), question="test")
 
     payload = json.loads(out)
     assert "error" in payload
     assert "RuntimeError" in payload["error"]
     assert "Agent initialization failed" in payload["error"]
+
+
+# ---------------------------------------------------------------------------
+# Integration: parse_tools expands ContextProvider correctly
+# ---------------------------------------------------------------------------
+
+
+def test_parse_tools_expands_context_provider_sync():
+    """parse_tools() correctly expands ContextProvider for sync agents."""
+    from agno.agent._tools import parse_tools
+    from agno.tools.function import Function
+    from unittest.mock import MagicMock
+
+    p = _EchoProvider(id="test", stream_sub_agent_events=True)
+
+    # Create a minimal mock agent
+    agent = MagicMock()
+    agent._team = None
+    agent.tool_hooks = None
+    agent._tool_instructions = []
+
+    model = MagicMock()
+    functions = parse_tools(agent, [p], model, async_mode=False)
+
+    # Should have expanded to query_test tool
+    assert len(functions) >= 1
+    tool_names = [f.name for f in functions]
+    assert "query_test" in tool_names
+
+    # Tool should be a Function with correct structure
+    query_tool = next(f for f in functions if f.name == "query_test")
+    assert isinstance(query_tool, Function)
+    assert query_tool.entrypoint is not None
+
+
+@pytest.mark.asyncio
+async def test_parse_tools_expands_context_provider_async():
+    """parse_tools() correctly expands ContextProvider for async agents."""
+    from agno.agent._tools import parse_tools
+    from agno.tools.function import Function
+    from unittest.mock import MagicMock
+
+    p = _EchoProvider(id="test", stream_sub_agent_events=True)
+
+    agent = MagicMock()
+    agent._team = None
+    agent.tool_hooks = None
+    agent._tool_instructions = []
+
+    model = MagicMock()
+    functions = parse_tools(agent, [p], model, async_mode=True)
+
+    assert len(functions) >= 1
+    tool_names = [f.name for f in functions]
+    assert "query_test" in tool_names
+
+    query_tool = next(f for f in functions if f.name == "query_test")
+    assert isinstance(query_tool, Function)
+
+
+def test_parse_tools_expands_toolkit_from_context_provider_mode_tools():
+    """When mode=tools, parse_tools expands the Toolkit returned by provider."""
+    from agno.agent._tools import parse_tools
+    from agno.context.mode import ContextMode
+    from agno.tools.function import Function
+    from unittest.mock import MagicMock
+
+    # _EchoProvider with mode=tools returns a Toolkit
+    p = _EchoProvider(id="test", mode=ContextMode.tools, stream_sub_agent_events=True)
+
+    agent = MagicMock()
+    agent._team = None
+    agent.tool_hooks = None
+    agent._tool_instructions = []
+
+    model = MagicMock()
+    functions = parse_tools(agent, [p], model, async_mode=False)
+
+    # Should have the toolkit's functions, not query_test
+    tool_names = [f.name for f in functions]
+    # Toolkit should have at least one function
+    assert len(functions) >= 1
+    for f in functions:
+        assert isinstance(f, Function)

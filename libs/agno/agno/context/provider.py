@@ -180,7 +180,7 @@ class ContextProvider(ABC):
             return self._default_tools(async_mode=async_mode)
         if self.mode == ContextMode.tools:
             return self._all_tools(async_mode=async_mode)
-        return [self._query_tool(async_mode=async_mode)]
+        return [self._build_query_tool(async_mode=async_mode)]
 
     # ------------------------------------------------------------------
     # Internals
@@ -195,13 +195,15 @@ class ContextProvider(ABC):
         return self._get_query_agent(run_context)
 
     def setup(self) -> None:
-        """Sync setup. Skips if already in an event loop."""
+        """Sync setup. Use asetup() in async contexts."""
         try:
             asyncio.get_running_loop()
-            # Already in async context — skip sync setup
+            # We're in an async context, can't use asyncio.run
         except RuntimeError:
             # No running loop — safe to use asyncio.run
             asyncio.run(self.asetup())
+            return
+        raise RuntimeError("setup() cannot be called from async context. Use 'await asetup()' instead.")
 
     def _run_kwargs_for_sub_agent(self, run_context: RunContext | None) -> dict:
         """Extract kwargs to pass to a sub-agent ``arun()`` from the
@@ -225,7 +227,7 @@ class ContextProvider(ABC):
     def _default_tools(self, async_mode: bool = False) -> list:
         """What `mode=default` resolves to. Override in subclasses to set
         the provider's recommended exposure."""
-        return [self._query_tool(async_mode=async_mode)]
+        return [self._build_query_tool(async_mode=async_mode)]
 
     def _read_write_tools(self, async_mode: bool = False) -> list:
         """Helper for subclasses with both query + update tools.
@@ -237,17 +239,18 @@ class ContextProvider(ABC):
         """
         tools: list = []
         if self.read:
-            tools.append(self._query_tool(async_mode=async_mode))
+            tools.append(self._build_query_tool(async_mode=async_mode))
         if self.write:
-            tools.append(self._update_tool(async_mode=async_mode))
+            tools.append(self._build_update_tool(async_mode=async_mode))
         return tools
 
-    def _query_tool(self, async_mode: bool = False):
+    def _build_query_tool(self, async_mode: bool = False):
+        """Return the appropriate query tool based on async_mode."""
         if async_mode:
             return self._aquery_tool()
-        return self._query_tool_sync()
+        return self._query_tool()
 
-    def _query_tool_sync(self):
+    def _query_tool(self):
         provider = self
 
         @tool(name=self.query_tool_name)
@@ -272,27 +275,31 @@ class ContextProvider(ABC):
                     run_id = run_context.run_id if run_context else None
                     final_output: RunOutput | None = None
 
-                    for event in agent.run(
-                        question,
-                        stream=True,
-                        stream_events=True,
-                        yield_run_output=True,
-                        **kwargs,
-                    ):
-                        if isinstance(event, RunOutput):
-                            final_output = event
-                            continue
+                    try:
+                        for event in agent.run(
+                            question,
+                            stream=True,
+                            stream_events=True,
+                            yield_run_output=True,
+                            **kwargs,
+                        ):
+                            if isinstance(event, RunOutput):
+                                final_output = event
+                                continue
 
-                        # Skip content chunks — they contaminate tool results when
-                        # accumulated alongside the final JSON. The frontend also
-                        # filters RunContent for display. Keep RunStarted/Completed
-                        # as the frontend uses them to group sub-agent events.
-                        if isinstance(event, RunContentEvent):
-                            continue
+                            # Skip content chunks — they contaminate tool results when
+                            # accumulated alongside the final JSON. The frontend also
+                            # filters RunContent for display. Keep RunStarted/Completed
+                            # as the frontend uses them to group sub-agent events.
+                            if isinstance(event, RunContentEvent):
+                                continue
 
-                        # Link sub-agent events to parent; preserve if already set
-                        event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
-                        yield event
+                            # Link sub-agent events to parent; preserve if already set
+                            event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
+                            yield event
+                    except Exception as exc:
+                        yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                        return
 
                     if final_output is not None:
                         from agno.context._utils import answer_from_run
@@ -338,27 +345,31 @@ class ContextProvider(ABC):
                     run_id = run_context.run_id if run_context else None
                     final_output: RunOutput | None = None
 
-                    async for event in agent.arun(
-                        question,
-                        stream=True,
-                        stream_events=True,
-                        yield_run_output=True,
-                        **kwargs,
-                    ):
-                        if isinstance(event, RunOutput):
-                            final_output = event
-                            continue
+                    try:
+                        async for event in agent.arun(
+                            question,
+                            stream=True,
+                            stream_events=True,
+                            yield_run_output=True,
+                            **kwargs,
+                        ):
+                            if isinstance(event, RunOutput):
+                                final_output = event
+                                continue
 
-                        # Skip content chunks — they contaminate tool results when
-                        # accumulated alongside the final JSON. The frontend also
-                        # filters RunContent for display. Keep RunStarted/Completed
-                        # as the frontend uses them to group sub-agent events.
-                        if isinstance(event, RunContentEvent):
-                            continue
+                            # Skip content chunks — they contaminate tool results when
+                            # accumulated alongside the final JSON. The frontend also
+                            # filters RunContent for display. Keep RunStarted/Completed
+                            # as the frontend uses them to group sub-agent events.
+                            if isinstance(event, RunContentEvent):
+                                continue
 
-                        # Link sub-agent events to parent; preserve if already set
-                        event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
-                        yield event
+                            # Link sub-agent events to parent; preserve if already set
+                            event.parent_run_id = getattr(event, "parent_run_id", None) or run_id
+                            yield event
+                    except Exception as exc:
+                        yield json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+                        return
 
                     if final_output is not None:
                         from agno.context._utils import answer_from_run
@@ -377,12 +388,13 @@ class ContextProvider(ABC):
 
         return _query
 
-    def _update_tool(self, async_mode: bool = False):
+    def _build_update_tool(self, async_mode: bool = False):
+        """Return the appropriate update tool based on async_mode."""
         if async_mode:
             return self._aupdate_tool()
-        return self._update_tool_sync()
+        return self._update_tool()
 
-    def _update_tool_sync(self):
+    def _update_tool(self):
         provider = self
 
         @tool(name=self.update_tool_name)
@@ -413,7 +425,7 @@ class ContextProvider(ABC):
         return _update
 
     def _all_tools(self, async_mode: bool = False) -> list:
-        return [self._query_tool(async_mode=async_mode)]
+        return [self._build_query_tool(async_mode=async_mode)]
 
 
 def _sanitize_id(raw: str) -> str:

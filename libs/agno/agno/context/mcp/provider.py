@@ -69,9 +69,10 @@ class MCPContextProvider(ContextProvider):
         base_instructions: str | None = None,
         mode: ContextMode = ContextMode.default,
         model: Model | None = None,
+        stream_sub_agent_events: bool = True,
     ) -> None:
         resolved_id = id or f"mcp_{_sanitize_id(server_name)}"
-        super().__init__(id=resolved_id, name=name or server_name, mode=mode, model=model)
+        super().__init__(id=resolved_id, name=name or server_name, mode=mode, model=model, stream_sub_agent_events=stream_sub_agent_events)
         self.server_name = server_name
         self.transport: Transport = transport
         self.command = command
@@ -178,7 +179,7 @@ class MCPContextProvider(ContextProvider):
     def _default_tools(self, async_mode: bool = False) -> list:
         # Always wrap behind a sub-agent — two MCP servers with a shared
         # tool name (e.g. `search`) would otherwise collide on the caller.
-        return [self._query_tool(async_mode=async_mode)]
+        return [self._build_query_tool(async_mode=async_mode)]
 
     def _all_tools(self, async_mode: bool = False) -> list:
         tools = self._tools

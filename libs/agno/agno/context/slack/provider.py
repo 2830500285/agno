@@ -54,8 +54,9 @@ class SlackContextProvider(ContextProvider):
         model: Model | None = None,
         read: bool = True,
         write: bool = True,
+        stream_sub_agent_events: bool = True,
     ) -> None:
-        super().__init__(id=id, name=name, mode=mode, model=model, read=read, write=write)
+        super().__init__(id=id, name=name, mode=mode, model=model, read=read, write=write, stream_sub_agent_events=stream_sub_agent_events)
         self.token = token or getenv("SLACK_BOT_TOKEN") or getenv("SLACK_TOKEN")
         if not self.token:
             raise ValueError("SlackContextProvider: SLACK_BOT_TOKEN (or SLACK_TOKEN) is required")
@@ -127,16 +128,16 @@ class SlackContextProvider(ContextProvider):
     def _default_tools(self, async_mode: bool = False) -> list:
         return self._read_write_tools(async_mode=async_mode)
 
-    def _query_tool(self, async_mode: bool = False):
-        query_tool = super()._query_tool(async_mode=async_mode)
+    def _build_query_tool(self, async_mode: bool = False):
+        query_tool = super()._build_query_tool(async_mode=async_mode)
         query_tool.description = (
             "Read Slack with a natural-language request. Use for channel history, workspace search, "
             "threads, and user or channel lookups."
         )
         return query_tool
 
-    def _update_tool(self, async_mode: bool = False):
-        update_tool = super()._update_tool(async_mode=async_mode)
+    def _build_update_tool(self, async_mode: bool = False):
+        update_tool = super()._build_update_tool(async_mode=async_mode)
         update_tool.description = (
             "Post a Slack message or thread reply with a natural-language instruction. Include the "
             "destination channel and the exact message to send. If the user asks to post, send, or "
